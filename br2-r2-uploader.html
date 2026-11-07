@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bloody Roar 2 — R2 Upload</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px 16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#10131a;color:#f4f6fb}
+  main{max-width:560px;margin:24px auto;padding:22px;border:1px solid #30394a;border-radius:18px;background:#191f2b}
+  h1{font-size:23px;margin:0 0 8px}
+  p{color:#b8c2d3;line-height:1.5}
+  label{display:block;margin:18px 0 8px;font-weight:600}
+  input,button{width:100%;font:inherit;border-radius:12px;padding:14px}
+  input{background:#0e1420;border:1px solid #46536a;color:#fff}
+  button{margin-top:18px;border:0;background:#3478f6;color:#fff;font-weight:700}
+  button:disabled{opacity:.5}
+  progress{width:100%;height:14px;margin-top:20px}
+  #status{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:14px;color:#d8e3f7}
+  small{display:block;color:#9ba8bc;margin-top:12px;line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+  <h1>อัปโหลดไฟล์เกมไปยัง R2</h1>
+  <p>เลือกไฟล์ ZIP เกมจากแอป Files บน iPhone ระบบจะอัปโหลดเป็นชิ้นขนาด 8 MB</p>
+
+  <label for="token">Upload token</label>
+  <input id="token" type="password" autocomplete="off" placeholder="ใส่ค่า Secret ที่ตั้งไว้ใน Worker">
+
+  <label for="file">ไฟล์เกม ZIP</label>
+  <input id="file" type="file" accept=".zip,application/zip">
+
+  <button id="upload">เริ่มอัปโหลด</button>
+  <progress id="progress" value="0" max="100"></progress>
+  <div id="status">รอเลือกไฟล์</div>
+  <small>อย่าปิด Safari ระหว่างอัปโหลด หากการเชื่อมต่อขาด ให้เริ่มใหม่ได้</small>
+</main>
+<script>
+const API = "https://br2-upload-gateway.fukthefuk400.workers.dev";
+const CHUNK_SIZE = 8 * 1024 * 1024;
+const statusEl = document.getElementById("status");
+const progressEl = document.getElementById("progress");
+const button = document.getElementById("upload");
+
+function say(message){ statusEl.textContent = message; }
+
+button.addEventListener("click", async () => {
+  const token = document.getElementById("token").value.trim();
+  const file = document.getElementById("file").files[0];
+  if (!token) return say("กรุณาใส่ Upload token ก่อน");
+  if (!file) return say("กรุณาเลือกไฟล์ ZIP ก่อน");
+  if (!file.name.toLowerCase().endsWith(".zip")) return say("กรุณาเลือกไฟล์ .zip");
+  if (file.size === 0) return say("ไฟล์ว่างเปล่า");
+
+  button.disabled = true;
+  progressEl.value = 0;
+  let uploadId = "";
+  try {
+    say("กำลังเริ่มการอัปโหลด...");
+    let r = await fetch(`${API}/?action=create`, {
+      method:"POST",
+      headers:{Authorization:`Bearer ${token}`}
+    });
+    if (!r.ok) throw new Error(`เริ่มอัปโหลดไม่สำเร็จ (${r.status}): ${await r.text()}`);
+    const created = await r.json();
+    uploadId = created.uploadId;
+    if (!uploadId) throw new Error("Worker ไม่ได้ส่ง uploadId กลับมา");
+
+    const parts = [];
+    const total = Math.ceil(file.size / CHUNK_SIZE);
+    for (let i=0; i<total; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      say(`กำลังอัปโหลดส่วนที่ ${i+1}/${total}\n${Math.round(end/file.size*100)}%`);
+      const chunk = await file.slice(start,end).arrayBuffer();
+      r = await fetch(`${API}/?action=part&uploadId=${encodeURIComponent(uploadId)}&partNumber=${i+1}`, {
+        method:"PUT",
+        headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/octet-stream"},
+        body:chunk
+      });
+      if (!r.ok) throw new Error(`อัปโหลดส่วนที่ ${i+1} ไม่สำเร็จ (${r.status}): ${await r.text()}`);
+      parts.push(await r.json());
+      progressEl.value = end / file.size * 95;
+    }
+
+    say("อัปโหลดครบทุกส่วนแล้ว กำลังประกอบไฟล์...");
+    r = await fetch(`${API}/?action=complete&uploadId=${encodeURIComponent(uploadId)}`, {
+      method:"POST",
+      headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+      body:JSON.stringify({parts})
+    });
+    if (!r.ok) throw new Error(`ประกอบไฟล์ไม่สำเร็จ (${r.status}): ${await r.text()}`);
+    const result = await r.json();
+    progressEl.value = 100;
+    say(`สำเร็จ! อัปโหลดไฟล์เข้า R2 แล้ว\nชื่อไฟล์: ${result.key}\nขนาด: ${result.size} bytes`);
+  } catch (e) {
+    say(`เกิดข้อผิดพลาด: ${e.message}\nหากอัปโหลดเริ่มไปแล้ว อาจมี multipart upload ค้างอยู่`);
+    if (uploadId) {
+      try {
+        await fetch(`${API}/?action=abort&uploadId=${encodeURIComponent(uploadId)}`, {
+          method:"DELETE", headers:{Authorization:`Bearer ${token}`}
+        });
+      } catch (_) {}
+    }
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
