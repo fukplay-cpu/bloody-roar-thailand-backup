@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ทดสอบ Cloudflare Worker - HTTP Range</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;padding:24px 18px;background:#101014;color:#f4f1e9;font:17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:720px;margin:auto}
+h1{font-size:25px;line-height:1.3}
+p{color:#c8c5bd}
+button{background:#d3ad55;color:#17130a;border:0;border-radius:13px;padding:15px 22px;font-size:18px;font-weight:700}
+#result{white-space:pre-wrap;overflow-wrap:anywhere;background:#242429;border-radius:14px;padding:16px;margin-top:20px;min-height:120px}
+.small{font-size:14px;color:#aaa}
+</style>
+</head>
+<body>
+<main>
+<h1>ทดสอบ Cloudflare Worker — HTTP Range</h1>
+<p>หน้านี้จะขอข้อมูลจากไฟล์ ZIP เพียง 1 KB เท่านั้น ไม่ดาวน์โหลด ZIP ทั้งไฟล์ ไม่แตก ZIP และไม่เรียกใช้ไลบรารีภายนอก</p>
+<button id="run">เริ่มทดสอบ GET + Range</button>
+<div id="result">รอเริ่มทดสอบ…</div>
+<p class="small">ผลที่ต้องการ: HTTP 206, Content-Range มีค่า bytes 0-1023/… และ Accept-Ranges: bytes</p>
+</main>
+<script>
+const WORKER = "https://br2-upload-gateway.fukthefuk400.workers.dev/?action=get";
+const out = document.getElementById("result");
+document.getElementById("run").addEventListener("click", async () => {
+  const button = document.getElementById("run");
+  button.disabled = true;
+  out.textContent = "กำลังส่ง GET พร้อม Range: bytes=0-1023 …";
+  try {
+    const response = await fetch(WORKER, {
+      method: "GET",
+      headers: { "Range": "bytes=0-1023" },
+      cache: "no-store"
+    });
+    const contentType = response.headers.get("Content-Type") || "(ไม่มี)";
+    const contentLength = response.headers.get("Content-Length") || "(ไม่มี)";
+    const contentRange = response.headers.get("Content-Range") || "(ไม่มี)";
+    const acceptRanges = response.headers.get("Accept-Ranges") || "(ไม่มี)";
+    const bytes = await response.arrayBuffer();
+    out.textContent =
+      "HTTP status: " + response.status + "\n" +
+      "Content-Type: " + contentType + "\n" +
+      "Content-Length: " + contentLength + "\n" +
+      "Content-Range: " + contentRange + "\n" +
+      "Accept-Ranges: " + acceptRanges + "\n" +
+      "จำนวนไบต์ที่ได้รับจริง: " + bytes.byteLength + "\n\n" +
+      (response.status === 206 && bytes.byteLength === 1024
+        ? "ผล: ผ่าน — Worker ส่งข้อมูลเฉพาะช่วง 1 KB"
+        : "ผล: ยังไม่ผ่าน — ตรวจค่าด้านบนก่อนแก้ไขต่อ");
+  } catch (error) {
+    out.textContent = "ทดสอบไม่สำเร็จ: " + (error && error.message ? error.message : String(error)) +
+      "\nอาจเป็นปัญหา CORS หรือการเชื่อมต่อ Worker";
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
