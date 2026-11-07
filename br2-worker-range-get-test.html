@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BR2 Range GET Test</title>
+<style>
+body{margin:0;background:#111;color:#eee;font:17px system-ui;padding:24px;line-height:1.55}
+main{max-width:700px;margin:auto}h1{font-size:25px}button{background:#d0aa52;color:#111;border:0;border-radius:13px;padding:16px 22px;font-size:18px;font-weight:700}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#222;padding:17px;border-radius:12px;min-height:190px}
+small{color:#aaa}
+</style>
+</head>
+<body><main>
+<h1>ทดสอบ GET + HTTP Range</h1>
+<p>รอบนี้จะไม่ส่ง HEAD เพราะ Worker อาจไม่รองรับคำขอชนิดนั้น เราจะส่ง GET พร้อม Range เพื่อขอข้อมูลเพียง 1 KB</p>
+<button id="run">เริ่มทดสอบ GET</button>
+<pre id="out">พร้อมทดสอบ</pre>
+<small>ถ้าเซิร์ฟเวอร์ตอบ 200 พร้อมไฟล์เต็ม ระบบจะยกเลิกทันทีโดยไม่อ่าน ZIP ทั้งก้อน</small>
+</main>
+<script>
+const URL='https://br2-upload-gateway.fukthefuk400.workers.dev/?action=get';
+const out=document.getElementById('out');
+function line(s){out.textContent+='\n'+s;}
+document.getElementById('run').addEventListener('click',async()=>{
+ const btn=document.getElementById('run');btn.disabled=true;out.textContent='เริ่มทดสอบ…';
+ const controller=new AbortController();
+ try{
+  line('ส่ง GET พร้อม Range: bytes=0-1023');
+  const res=await fetch(URL,{
+   method:'GET',
+   mode:'cors',
+   cache:'no-store',
+   headers:{'Range':'bytes=0-1023'},
+   signal:controller.signal
+  });
+  line('HTTP status: '+res.status);
+  line('Content-Type: '+(res.headers.get('content-type')||'(ไม่มี)'));
+  line('Content-Length: '+(res.headers.get('content-length')||'(ไม่มี)'));
+  line('Content-Range: '+(res.headers.get('content-range')||'(ไม่มี)'));
+  line('Accept-Ranges: '+(res.headers.get('accept-ranges')||'(ไม่มี)'));
+  if(res.status===206){
+   const bytes=await res.arrayBuffer();
+   line('อ่านข้อมูลได้จริง: '+bytes.byteLength+' bytes');
+   line('ผล: Worker รองรับ Range และ CORS สำหรับ GET ผ่าน');
+  }else if(res.status===200){
+   controller.abort();
+   line('ผล: Worker ตอบ 200 (ส่งไฟล์เต็ม ไม่ได้แบ่งช่วง)');
+   line('ยกเลิกคำขอทันทีเพื่อป้องกันการโหลด ZIP 305 MB');
+   line('สรุป: ต้องเพิ่มการรองรับ HTTP Range ใน Worker');
+  }else{
+   controller.abort();
+   line('ผล: Worker ปฏิเสธ GET ด้วย HTTP '+res.status);
+   line('สรุป: ตรวจเงื่อนไข action=get หรือการอนุญาตใน Worker');
+  }
+ }catch(e){
+  if(e && e.name==='AbortError') line('ยกเลิกการรับข้อมูลส่วนที่เหลือแล้ว');
+  else line('ERROR: '+(e&&e.message?e.message:String(e)));
+  line('สรุป: คำขอ GET ข้ามโดเมนไม่สำเร็จ หรือการเชื่อมต่อถูกตัด');
+ }finally{btn.disabled=false;}
+});
+</script>
+</body></html>
