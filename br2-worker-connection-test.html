@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BR2 Worker Connection Test</title>
+<style>
+body{margin:0;background:#111;color:#eee;font:16px system-ui;padding:24px;line-height:1.5}
+main{max-width:680px;margin:auto}h1{font-size:24px}button{background:#d0a94f;color:#111;border:0;border-radius:12px;padding:14px 18px;font-size:17px;font-weight:700}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#222;padding:16px;border-radius:10px;min-height:180px}
+.note{color:#bbb;font-size:14px}
+</style>
+</head>
+<body><main>
+<h1>ทดสอบการเชื่อมต่อ Cloudflare Worker</h1>
+<p>หน้านี้จะตรวจเฉพาะ Headers และขอข้อมูล ZIP เพียงช่วงแรก หาก Worker ไม่รองรับ Range จะยกเลิกก่อนดาวน์โหลดไฟล์ใหญ่</p>
+<button id="test">เริ่มทดสอบ</button>
+<pre id="out">พร้อมทดสอบ</pre>
+<p class="note">หน้านี้ไม่แตก ZIP และไม่เปลี่ยนแปลงไฟล์เกม</p>
+</main>
+<script>
+const URL='https://br2-upload-gateway.fukthefuk400.workers.dev/?action=get';
+const out=document.getElementById('out');
+function say(s){out.textContent+=`\n${s}`;}
+document.getElementById('test').addEventListener('click',async()=>{
+ const b=document.getElementById('test');b.disabled=true;out.textContent='เริ่มทดสอบ…';
+ let controller;
+ try{
+  say('1) ส่ง HEAD เพื่อดูว่า Worker ตอบกลับหรือไม่');
+  const head=await fetch(URL,{method:'HEAD',mode:'cors',cache:'no-store'});
+  say('HEAD status: '+head.status);
+  say('Content-Type: '+(head.headers.get('content-type')||'(ไม่มี)'));
+  say('Content-Length: '+(head.headers.get('content-length')||'(ไม่มี)'));
+  if(!head.ok) throw new Error('HEAD ตอบ HTTP '+head.status);
+  say('2) ขอเฉพาะ bytes=0-1023');
+  controller=new AbortController();
+  const res=await fetch(URL,{method:'GET',headers:{Range:'bytes=0-1023'},mode:'cors',cache:'no-store',signal:controller.signal});
+  say('GET status: '+res.status);
+  say('Content-Range: '+(res.headers.get('content-range')||'(ไม่มี)'));
+  say('Content-Length: '+(res.headers.get('content-length')||'(ไม่มี)'));
+  if(res.status===206){
+    const data=await res.arrayBuffer();
+    say('อ่านข้อมูลได้ '+data.byteLength+' bytes');
+    say('ผล: Range ทำงานและอ่านข้อมูลข้ามโดเมนได้');
+  }else{
+    controller.abort();
+    say('ผล: Worker ไม่ได้ส่ง 206 Partial Content จึงยกเลิกทันทีเพื่อไม่โหลด ZIP ทั้งก้อน');
+    say('สรุป: ต้องเพิ่มการรองรับ HTTP Range ใน Worker ก่อน จึงจะทดสอบการรับช่วงข้อมูลได้');
+  }
+ }catch(e){
+  say('ERROR: '+(e&&e.message?e.message:String(e)));
+  say('สรุป: คำขอข้ามโดเมนล้มเหลวก่อนอ่านข้อมูล หรือ Worker ปฏิเสธคำขอ');
+ }finally{b.disabled=false;}
+});
+</script>
+</body></html>
